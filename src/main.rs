@@ -13,9 +13,7 @@ use rocket::request::Form;
 use rocket::request::FromFormValue;
 use rocket_contrib::json::Json;
 
-use jwt::claims::Registered;
-use jwt::header::Header;
-use jwt::Token;
+extern crate jsonwebtoken as jwt;
 
 struct GlobalAddr(String);
 
@@ -69,9 +67,11 @@ struct AuthTransaction {
 
 #[derive(Serialize)]
 struct AuthToken {
-    token: String,
+    token: Option<String>,
+    error: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 struct AuthTokenData {
     iss: String,
     sub: String,
@@ -80,28 +80,38 @@ struct AuthTokenData {
     jti: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct GenericError {
+    error: String,
+}
+
 fn authenticate_token(auth_tx: &AuthTransaction) -> Result<String, String> {
-  let registered = Registered{
-    iss: Some("iss".into()),
-    sub: Some("sub".into()),
-    iat: Some(123),
-    exp: Some(234),
-    jti: Some("jti".into()),
-    ..Default::default()
-  };
+    let claims = AuthTokenData {
+        iss: "https://127.0.0.1".to_owned(),
+        sub: "sub".to_owned(),
+        iat: 123,
+        exp: 234,
+        jti: auth_tx.transaction.to_owned(),
+    };
 
-  let headers = Header::default();
-
-  let token = Token::new(headers, registered);
-
-  token.signed("fdjskfjsklfsjklfdsjklfdsjkfdsjfdkljfdsk", 
+    match jwt::encode(&jwt::Header::default(), &claims, "secret".as_ref()) {
+        Ok(token) => Ok(token),
+        Err(err) => Err(err.to_string()),
+    }
 }
 
 #[post("/token", format = "application/json", data = "<auth_tx>", rank = 1)]
 fn token_json(auth_tx: Json<AuthTransaction>) -> Json<AuthToken> {
-    Json(AuthToken {
-        token: authenticate_token(auth_tx),
-    })
+    match authenticate_token(&auth_tx) {
+        Ok(token) => Json(AuthToken {
+            token: Some(token),
+            error: None,
+        }),
+        Err(error) => Json(AuthToken {
+            token: None,
+            error: Some(error),
+        }),
+    }
 }
 
 #[post(
@@ -111,9 +121,16 @@ fn token_json(auth_tx: Json<AuthTransaction>) -> Json<AuthToken> {
     rank = 2
 )]
 fn token_form(auth_tx: Form<AuthTransaction>) -> Json<AuthToken> {
-    Json(AuthToken {
-        token: authenticate_token(auth_tx),
-    })
+    match authenticate_token(&auth_tx) {
+        Ok(token) => Json(AuthToken {
+            token: Some(token),
+            error: None,
+        }),
+        Err(error) => Json(AuthToken {
+            token: None,
+            error: Some(error),
+        }),
+    }
 }
 
 fn main() {
